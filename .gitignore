@@ -1,0 +1,149 @@
+# =============================================================================
+# .NET / ASP.NET Core
+# =============================================================================
+
+# Build output
+bin/
+obj/
+
+# NuGet packages
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/build/
+packages/
+nuget.config
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Published output
+publish/
+**/publish/
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Rider/ReSharper
+.idea/
+_ReSharper*/
+*.ReSharper
+*.DotSettings.user
+
+# Entity Framework migrations snapshot backup (keep migrations, ignore temp)
+*.edmx.diagram
+
+# ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+# Test results
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coveragexml
+coverage*/
+*.coverage
+
+# App secrets / connection strings (never commit these)
+appsettings.*.json
+!appsettings.json
+!appsettings.Development.json
+secrets.json
+*.pfx
+*.p12
+*.key
+
+# =============================================================================
+# Visual Studio / IDE
+# =============================================================================
+
+.vs/
+*.sln.ide
+*.vcxproj.filters
+*.vcxproj.user
+.vscode/settings.json
+.vscode/launch.json
+
+# =============================================================================
+# Flutter / Dart  (FlutterApp subfolder)
+# El archivo FlutterApp/.gitignore maneja las reglas internas del proyecto.
+# Aqui cubrimos los folders que deben ignorarse visto desde la raiz.
+# =============================================================================
+
+# Dart tool cache
+FlutterApp/.dart_tool/
+
+# Flutter build output
+FlutterApp/build/
+
+# Flutter plugins generated files
+FlutterApp/.flutter-plugins
+FlutterApp/.flutter-plugins-dependencies
+
+# Pub cache local
+FlutterApp/.pub/
+FlutterApp/.pub-cache/
+
+# Drift / build_runner generated files (regenerar con: dart run build_runner build)
+FlutterApp/lib/**/*.g.dart
+FlutterApp/lib/**/*.freezed.dart
+FlutterApp/lib/**/*.mocks.dart
+
+# Android build artifacts
+FlutterApp/android/.gradle/
+FlutterApp/android/app/debug/
+FlutterApp/android/app/profile/
+FlutterApp/android/app/release/
+FlutterApp/android/local.properties
+FlutterApp/android/.kotlin/
+
+# IntelliJ / Android Studio
+FlutterApp/.idea/
+FlutterApp/*.iml
+FlutterApp/**/*.iml
+
+# iOS (si se agrega en el futuro)
+FlutterApp/ios/Pods/
+FlutterApp/ios/.symlinks/
+FlutterApp/ios/Flutter/Flutter.framework/
+FlutterApp/ios/Flutter/Flutter.podspec
+FlutterApp/ios/Flutter/Generated.xcconfig
+FlutterApp/ios/Flutter/app.flx
+FlutterApp/ios/Flutter/app.zip
+FlutterApp/ios/Flutter/flutter_assets/
+
+# =============================================================================
+# Sistema operativo
+# =============================================================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# =============================================================================
+# Editores / herramientas
+# =============================================================================
+
+*.swp
+*.swo
+*.orig
+*.bak
+.history/
+
+# Claude Code / AI tools (contexto local, no para repositorio)
+.claude/
+.qwen/

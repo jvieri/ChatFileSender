@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="ChatWithFiles.Api/ChatWithFiles.Api.csproj" />
+  <Project Path="ChatWithFiles.Application/ChatWithFiles.Application.csproj" />
+  <Project Path="ChatWithFiles.Contracts/ChatWithFiles.Contracts.csproj" />
+  <Project Path="ChatWithFiles.Domain/ChatWithFiles.Domain.csproj" />
+  <Project Path="ChatWithFiles.Infrastructure/ChatWithFiles.Infrastructure.csproj" />
+</Solution>
