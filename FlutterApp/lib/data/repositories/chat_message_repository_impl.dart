@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import '../../core/constants.dart';
 import '../../core/use_result.dart';
 import '../../domain/entities/chat_message.dart';
@@ -179,6 +182,51 @@ class ChatMessageRepositoryImpl implements ChatMessageRepository {
     // Implementation would call API to mark message as read
     return Future.value();
   }
+
+  @override
+  Stream<int> downloadFile({
+    required String fileId,
+    required String fileName,
+  }) async* {
+    final ctrl = StreamController<int>();
+
+    getTemporaryDirectory().then((dir) async {
+      final dlDir = Directory(p.join(dir.path, 'chat_downloads'));
+      if (!await dlDir.exists()) await dlDir.create(recursive: true);
+      final savePath = p.join(dlDir.path, fileName);
+      dio
+          .download(
+        '${AppConstants.apiVersion}/files/$fileId/download',
+        savePath,
+        onReceiveProgress: (received, total) {
+          if (!ctrl.isClosed && total > 0) {
+            ctrl.add((received * 100 / total).clamp(0, 99).toInt());
+          }
+        },
+        options: Options(
+          receiveTimeout: const Duration(minutes: 10),
+        ),
+      )
+          .then((_) {
+        if (!ctrl.isClosed) {
+          ctrl.add(100);
+          ctrl.close();
+        }
+      }).catchError((dynamic e) {
+        if (!ctrl.isClosed) {
+          ctrl.addError(e as Object);
+          ctrl.close();
+        }
+      });
+    }).catchError((dynamic e) {
+      if (!ctrl.isClosed) {
+        ctrl.addError(e as Object);
+        ctrl.close();
+      }
+    });
+
+    yield* ctrl.stream;
+  }
   
   ChatMessage _parseMessage(Map<String, dynamic> json) {
     final attachments = (json['attachments'] as List?)
@@ -189,7 +237,7 @@ class ChatMessageRepositoryImpl implements ChatMessageRepository {
                   originalFileName: a['originalFileName'] as String,
                   fileType: a['fileType'] as String,
                   fileExtension: a['fileExtension'] as String,
-                  fileSize: a['fileSize'] as int,
+                  fileSize: (a['fileSize'] as num).toInt(),
                   uploadStatus: _parseUploadStatus(a['uploadStatus'] as String),
                   uploadProgress: a['uploadProgress'] as int? ?? 0,
                   thumbnailUrl: a['thumbnailUrl'] as String?,

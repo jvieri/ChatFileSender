@@ -29,89 +29,81 @@ public class CreateMessageWithFileCommandHandler : IRequestHandler<CreateMessage
     
     public async Task<CreateMessageWithFileResponse> Handle(CreateMessageWithFileCommand request, CancellationToken cancellationToken)
     {
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        
-        try
+        // 1. Create the chat message
+        var message = new ChatMessage
         {
-            // 1. Create the chat message
-            var message = new ChatMessage
+            Id = Guid.NewGuid(),
+            SenderId = request.SenderId,
+            ReceiverId = request.ReceiverId,
+            GroupId = request.GroupId,
+            TextContent = request.TextContent,
+            MessageType = request.Files.Any() ? MessageType.File : MessageType.Text,
+            Status = MessageStatus.Sent,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _messageRepository.CreateAsync(message, cancellationToken);
+
+        // 2. Create file attachments and generate upload URLs
+        var uploadUrls = new List<FileUploadUrlResponse>();
+
+        foreach (var fileRequest in request.Files)
+        {
+            if (fileRequest.FileSize > MaxFileSize)
+                throw new ArgumentException($"File size {fileRequest.FileSize} exceeds maximum allowed size of {MaxFileSize} bytes");
+
+            if (!IsValidFileType(fileRequest.FileType))
+                throw new ArgumentException($"File type '{fileRequest.FileType}' is not allowed");
+
+            var extension = Path.GetExtension(fileRequest.FileName);
+            var storageKey = GenerateStorageKey(message.Id, fileRequest.FileName);
+
+            var fileAttachment = new FileAttachment
             {
                 Id = Guid.NewGuid(),
-                SenderId = request.SenderId,
-                ReceiverId = request.ReceiverId,
-                GroupId = request.GroupId,
-                TextContent = request.TextContent,
-                MessageType = request.Files.Any() ? MessageType.File : MessageType.Text,
-                Status = MessageStatus.Sent,
+                MessageId = message.Id,
+                FileName = fileRequest.FileName,
+                OriginalFileName = fileRequest.FileName,
+                FileType = fileRequest.FileType,
+                FileExtension = extension,
+                FileSize = fileRequest.FileSize,
+                StorageKey = storageKey,
+                UploadStatus = UploadStatus.Pending,
+                UploadProgress = 0,
+                UploadedBy = request.SenderId,
                 CreatedAt = DateTime.UtcNow
             };
-            
-            await _messageRepository.CreateAsync(message, cancellationToken);
-            
-            // 2. Create file attachments and generate upload URLs
-            var uploadUrls = new List<FileUploadUrlResponse>();
-            
-            foreach (var fileRequest in request.Files)
+
+            await _fileRepository.CreateAsync(fileAttachment, cancellationToken);
+
+            // SAS URL is computed locally (no network call to Azurite needed).
+            // Flutter uses /files/{id}/upload-bytes directly, so this URL is informational.
+            string uploadUrl;
+            try
             {
-                // Validate file size
-                if (fileRequest.FileSize > MaxFileSize)
-                {
-                    throw new ArgumentException($"File size {fileRequest.FileSize} exceeds maximum allowed size of {MaxFileSize} bytes");
-                }
-                
-                // Validate file type
-                if (!IsValidFileType(fileRequest.FileType))
-                {
-                    throw new ArgumentException($"File type '{fileRequest.FileType}' is not allowed");
-                }
-                
-                // Create file attachment record
-                var extension = Path.GetExtension(fileRequest.FileName);
-                var storageKey = GenerateStorageKey(message.Id, fileRequest.FileName);
-                
-                var fileAttachment = new FileAttachment
-                {
-                    Id = Guid.NewGuid(),
-                    MessageId = message.Id,
-                    FileName = fileRequest.FileName,
-                    OriginalFileName = fileRequest.FileName,
-                    FileType = fileRequest.FileType,
-                    FileExtension = extension,
-                    FileSize = fileRequest.FileSize,
-                    StorageKey = storageKey,
-                    UploadStatus = UploadStatus.Pending,
-                    UploadProgress = 0,
-                    UploadedBy = request.SenderId,
-                    CreatedAt = DateTime.UtcNow
-                };
-                
-                await _fileRepository.CreateAsync(fileAttachment, cancellationToken);
-                
-                // Generate presigned upload URL
-                var uploadUrl = await _storageService.GenerateUploadUrlAsync(
+                uploadUrl = await _storageService.GenerateUploadUrlAsync(
                     storageKey,
                     TimeSpan.FromHours(UrlExpirationHours),
                     MaxFileSize,
                     cancellationToken
                 );
-                
-                uploadUrls.Add(new FileUploadUrlResponse(
-                    fileAttachment.Id,
-                    uploadUrl,
-                    DateTime.UtcNow.AddHours(UrlExpirationHours)
-                ));
             }
-            
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _unitOfWork.CommitTransactionAsync(cancellationToken);
-            
-            return new CreateMessageWithFileResponse(message.Id, uploadUrls);
+            catch
+            {
+                uploadUrl = string.Empty;
+            }
+
+            uploadUrls.Add(new FileUploadUrlResponse(
+                fileAttachment.Id,
+                uploadUrl,
+                DateTime.UtcNow.AddHours(UrlExpirationHours)
+            ));
         }
-        catch
-        {
-            await _unitOfWork.RollbackTransactionAsync(cancellationToken);
-            throw;
-        }
+
+        // 3. Persist message + all attachments atomically via EF implicit transaction
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new CreateMessageWithFileResponse(message.Id, uploadUrls);
     }
     
     private bool IsValidFileType(string mimeType)

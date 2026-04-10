@@ -115,10 +115,17 @@ public class FilesController : ControllerBase
             if (attachment == null)
                 return NotFound(new { error = $"File attachment {fileId} not found" });
 
+            // Save file bytes to local temp storage so the download endpoint can serve them
+            var localPath = GetLocalStoragePath(attachment.StorageKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+            await using (var fs = System.IO.File.Create(localPath))
+            {
+                await file.CopyToAsync(fs, cancellationToken);
+            }
+
             await fileRepository.MarkAsUploadedAsync(
                 fileId, attachment.StorageKey, file.Length, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
-            await unitOfWork.CommitTransactionAsync(cancellationToken);
 
             await chatHub.NotifyFileUploadProgressAsync(
                 attachment.UploadedBy.ToString(), fileId, 100, "Uploaded");
@@ -133,6 +140,50 @@ public class FilesController : ControllerBase
             _logger.LogError(ex, "Direct upload failed for FileId={FileId}", fileId);
             return StatusCode(500, new { error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Download a previously uploaded file (demo: served from local temp storage).
+    /// </summary>
+    [HttpGet("{fileId}/download")]
+    public async Task<IActionResult> Download(
+        Guid fileId,
+        [FromServices] IFileAttachmentRepository fileRepository,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var attachment = await fileRepository.GetByIdAsync(fileId, cancellationToken);
+            if (attachment == null)
+                return NotFound(new { error = $"File attachment {fileId} not found" });
+
+            var localPath = GetLocalStoragePath(attachment.StorageKey);
+            if (!System.IO.File.Exists(localPath))
+                return NotFound(new { error = "File data not found in storage" });
+
+            var stream = System.IO.File.OpenRead(localPath);
+            var contentType = string.IsNullOrWhiteSpace(attachment.FileType)
+                ? "application/octet-stream"
+                : attachment.FileType;
+            var fileName = attachment.OriginalFileName ?? attachment.FileName;
+
+            return File(stream, contentType, fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Download failed for FileId={FileId}", fileId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    private static string GetLocalStoragePath(string storageKey)
+    {
+        // storageKey is e.g. "chat-files/{messageId}/{timestamp}-{guid}.ext"
+        // Store under %TEMP%/chatfiles-demo/ preserving the sub-path.
+        var basePath = Path.Combine(Path.GetTempPath(), "chatfiles-demo");
+        // Normalise forward slashes to OS separator
+        var relative = storageKey.Replace('/', Path.DirectorySeparatorChar);
+        return Path.Combine(basePath, relative);
     }
 
     /// <summary>

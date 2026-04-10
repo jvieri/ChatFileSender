@@ -61,5 +61,5 @@ class ChatMessage extends Equatable {
   }
   
   @override
-  List<Object?> get props => [id, senderId, messageType, status, createdAt];
+  List<Object?> get props => [id, senderId, messageType, status, attachments, createdAt];
 }

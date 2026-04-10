@@ -43,4 +43,12 @@ abstract class ChatMessageRepository {
   });
 
   Future<void> markAsRead(String messageId);
+
+  /// Downloads a file attachment to the device's temp directory.
+  /// Yields progress values 0–100.
+  /// Returns the local file path on completion.
+  Stream<int> downloadFile({
+    required String fileId,
+    required String fileName,
+  });
 }

@@ -32,14 +32,12 @@ public class EfUnitOfWork : IUnitOfWork, IDisposable
     
     public async Task CommitTransactionAsync(CancellationToken ct = default)
     {
+        if (_currentTransaction == null) return; // nothing to commit
+
         try
         {
             await _context.SaveChangesAsync(ct);
-            
-            if (_currentTransaction != null)
-            {
-                await _currentTransaction.CommitAsync(ct);
-            }
+            await _currentTransaction.CommitAsync(ct);
         }
         catch
         {
@@ -48,11 +46,8 @@ public class EfUnitOfWork : IUnitOfWork, IDisposable
         }
         finally
         {
-            if (_currentTransaction != null)
-            {
-                _currentTransaction.Dispose();
-                _currentTransaction = null;
-            }
+            _currentTransaction.Dispose();
+            _currentTransaction = null;
         }
     }
     

@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -34,16 +33,40 @@ public class FileProcessingConsumer : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("FileProcessingConsumer starting...");
-        
+
         var factory = new ConnectionFactory
         {
             Uri = new Uri(_connectionString),
             AutomaticRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
         };
-        
-        var connection = await factory.CreateConnectionAsync(stoppingToken);
-        var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
+
+        // Retry connecting to RabbitMQ up to 5 times with back-off.
+        // If RabbitMQ is not available, log a warning and exit gracefully
+        // so the rest of the API keeps running.
+        IConnection? connection = null;
+        for (int attempt = 1; attempt <= 5; attempt++)
+        {
+            try
+            {
+                connection = await factory.CreateConnectionAsync(stoppingToken);
+                break;
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "FileProcessingConsumer: RabbitMQ connection attempt {Attempt}/5 failed", attempt);
+                if (attempt == 5)
+                {
+                    _logger.LogWarning(
+                        "FileProcessingConsumer: RabbitMQ unavailable after 5 attempts — consumer disabled");
+                    return;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(attempt * 2), stoppingToken);
+            }
+        }
+
+        var channel = await connection!.CreateChannelAsync(cancellationToken: stoppingToken);
         
         // Declare queues
         await channel.QueueDeclareAsync(

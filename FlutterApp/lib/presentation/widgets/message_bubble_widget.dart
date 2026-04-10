@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import '../../domain/entities/chat_message.dart';
+import '../../domain/repositories/chat_message_repository.dart';
 import 'file_attachment_widget.dart';
 
 class MessageBubbleWidget extends StatelessWidget {
   final ChatMessage message;
   final VoidCallback? onFileTap;
-  
+  final ChatMessageRepository? repository;
+
   const MessageBubbleWidget({
     super.key,
     required this.message,
     this.onFileTap,
+    this.repository,
   });
   
   @override
@@ -71,6 +74,7 @@ class MessageBubbleWidget extends StatelessWidget {
                           onRetry: attachment.canRetry ? () {
                             // Retry upload - would trigger BLoC event
                           } : null,
+                          repository: repository,
                         ),
                       );
                     }).toList(),

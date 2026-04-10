@@ -18,19 +18,24 @@ public class AzureBlobStorageService : IStorageService, IDisposable
         _blobServiceClient = new BlobServiceClient(connectionString);
         _containerName = containerName;
         
-        // Extract account info for SAS generation
+        // Extract account info for SAS generation.
+        // Use Substring instead of Split('=')[1] because the AccountKey value
+        // contains '=' characters (base64 padding) that Split would truncate.
         var parts = connectionString.Split(';');
-        _accountName = parts.First(p => p.StartsWith("AccountName=")).Split('=')[1];
-        _accountKey = parts.First(p => p.StartsWith("AccountKey=")).Split('=')[1];
+        var namePart = parts.First(p => p.StartsWith("AccountName="));
+        var keyPart  = parts.First(p => p.StartsWith("AccountKey="));
+        _accountName = namePart.Substring("AccountName=".Length);
+        _accountKey  = keyPart.Substring("AccountKey=".Length);
     }
     
-    public async Task<string> GenerateUploadUrlAsync(string storageKey, TimeSpan expiration, long maxSize, CancellationToken ct = default)
+    public Task<string> GenerateUploadUrlAsync(string storageKey, TimeSpan expiration, long maxSize, CancellationToken ct = default)
     {
+        // The SAS token is computed purely from the account key (HMAC) — no network
+        // call needed.  Avoid CreateIfNotExistsAsync which hits Azurite and fails
+        // when Azurite's supported API version is older than the SDK's version.
         var containerClient = _blobServiceClient.GetBlobContainerClient(_containerName);
-        await containerClient.CreateIfNotExistsAsync(cancellationToken: ct);
-        
         var blobClient = containerClient.GetBlobClient(storageKey);
-        
+
         var sasBuilder = new BlobSasBuilder
         {
             BlobContainerName = _containerName,
@@ -39,14 +44,14 @@ public class AzureBlobStorageService : IStorageService, IDisposable
             StartsOn = DateTimeOffset.UtcNow,
             ExpiresOn = DateTimeOffset.UtcNow.Add(expiration)
         };
-        
+
         sasBuilder.SetPermissions(BlobSasPermissions.Write | BlobSasPermissions.Create);
-        
+
         var sasToken = sasBuilder.ToSasQueryParameters(
             new Azure.Storage.StorageSharedKeyCredential(_accountName, _accountKey)
         ).ToString();
-        
-        return $"{blobClient.Uri}?{sasToken}";
+
+        return Task.FromResult($"{blobClient.Uri}?{sasToken}");
     }
     
     public async Task<string> GenerateDownloadUrlAsync(string storageKey, TimeSpan expiration, CancellationToken ct = default)

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/constants.dart';
 import '../../di/injection.dart';
 import '../../domain/entities/chat_message.dart';
+import '../../domain/repositories/chat_message_repository.dart';
 import '../../domain/entities/file_attachment.dart';
 import '../../services/signalr_service.dart';
 import '../bloc/chat_bloc.dart';
@@ -157,6 +158,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -255,11 +257,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: ListView.builder(
                     controller: _scrollController,
                     reverse: false,
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                     itemCount: chatState.messages.length,
                     itemBuilder: (context, index) {
                       final message = chatState.messages[index];
-                      return MessageBubbleWidget(message: message);
+                      return MessageBubbleWidget(
+                        message: message,
+                        repository: sl<ChatMessageRepository>(),
+                      );
                     },
                   ),
                 );
@@ -316,7 +321,72 @@ class _ChatScreenState extends State<ChatScreen> {
           
           // Simulator Panel
           if (_isShowSimulator) _buildSimulatorPanel(),
-          
+
+          // Selected files — shown directly above the input row
+          BlocBuilder<FileUploadBloc, FileUploadState>(
+            builder: (context, state) {
+              if (state.selectedFiles.isEmpty) return const SizedBox.shrink();
+              return Container(
+                constraints: const BoxConstraints(maxHeight: 80),
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  border: Border(top: BorderSide(color: Colors.grey.shade300)),
+                ),
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: state.selectedFiles.length,
+                  itemBuilder: (context, index) {
+                    final file = state.selectedFiles[index];
+                    return Container(
+                      margin: const EdgeInsets.only(right: 8, top: 4, bottom: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.insert_drive_file, size: 18, color: Colors.blue.shade700),
+                          const SizedBox(width: 6),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 120),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  file.fileName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                Text(
+                                  file.formattedFileSize,
+                                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () => context
+                                .read<FileUploadBloc>()
+                                .add(RemoveFileEvent(file.id)),
+                            child: const Icon(Icons.close, size: 16, color: Colors.red),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+
           // Input area
           Container(
             padding: const EdgeInsets.all(8),
@@ -376,70 +446,9 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
 
-      // Selected files bottom sheet
-      bottomSheet: BlocBuilder<FileUploadBloc, FileUploadState>(
-        builder: (context, state) {
-          if (state.selectedFiles.isEmpty) return const SizedBox.shrink();
-          
-          return Container(
-            height: 120,
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${state.selectedFiles.length} file(s) selected',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: state.selectedFiles.length,
-                    itemBuilder: (context, index) {
-                      final file = state.selectedFiles[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Stack(
-                          children: [
-                            FileAttachmentWidget(attachment: file),
-                            Positioned(
-                              top: 4,
-                              right: 4,
-                              child: GestureDetector(
-                                onTap: () {
-                                  context
-                                      .read<FileUploadBloc>()
-                                      .add(RemoveFileEvent(file.id));
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.all(2),
-                                  decoration: const BoxDecoration(
-                                    color: Colors.red,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.close,
-                                    size: 16,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
     );
   }
-  
+
   Widget _buildSimulatorPanel() {
     return Container(
       height: 280,
