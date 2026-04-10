@@ -48,13 +48,19 @@ public class ChatHub : Hub
     
     public override async Task OnConnectedAsync()
     {
-        _logger.LogInformation("User connected: {ConnectionId}", Context.ConnectionId);
+        var userId = Context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                     ?? "(anonymous)";
+        _logger.LogInformation(
+            "SignalR CONNECTED — ConnectionId: {ConnectionId} | UserId: {UserId}",
+            Context.ConnectionId, userId);
         await base.OnConnectedAsync();
     }
-    
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        _logger.LogInformation("User disconnected: {ConnectionId}", Context.ConnectionId);
+        _logger.LogInformation(
+            "SignalR DISCONNECTED — ConnectionId: {ConnectionId} | Error: {Error}",
+            Context.ConnectionId, exception?.Message ?? "clean");
         await base.OnDisconnectedAsync(exception);
     }
 }

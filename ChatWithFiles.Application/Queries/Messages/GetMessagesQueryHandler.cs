@@ -27,13 +27,12 @@ public class GetMessagesQueryHandler : IRequestHandler<GetMessagesQuery, GetMess
                 cancellationToken
             );
         }
-        else if (request.UserId.HasValue)
+        else if (request.UserId.HasValue && request.CurrentUserId.HasValue)
         {
-            // For direct messages, we need to get messages between current user and target user
-            // This is simplified - in reality you'd pass both user IDs
-            messages = await _messageRepository.GetRecentMessagesAsync(
-                request.UserId,
-                null,
+            messages = await _messageRepository.GetDirectMessagesAsync(
+                request.CurrentUserId.Value,
+                request.UserId.Value,
+                request.Page,
                 request.PageSize,
                 cancellationToken
             );

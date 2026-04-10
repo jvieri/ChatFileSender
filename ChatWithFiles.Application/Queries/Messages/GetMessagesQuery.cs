@@ -4,6 +4,7 @@ using MediatR;
 namespace ChatWithFiles.Application.Queries.Messages;
 
 public record GetMessagesQuery(
+    Guid? CurrentUserId,
     Guid? UserId,
     Guid? GroupId,
     int Page,

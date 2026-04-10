@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../core/constants.dart';
+import '../../di/injection.dart';
 import '../../domain/entities/chat_message.dart';
+import '../../domain/entities/file_attachment.dart';
+import '../../services/signalr_service.dart';
 import '../bloc/chat_bloc.dart';
 import '../bloc/file_upload_bloc.dart';
 import '../widgets/file_attachment_widget.dart';
@@ -27,19 +31,62 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _isShowSimulator = false;
   
-  String get chatId => widget.groupId ?? widget.userId ?? '';
-  
+  // For DM: sort both user IDs so both sides join the same room.
+  String get chatId {
+    if (widget.groupId != null) return widget.groupId!;
+    if (widget.userId != null) {
+      final me = ChatMessage.currentUserId;
+      final other = widget.userId!;
+      final ids = [me, other]..sort();
+      return '${ids[0]}_${ids[1]}';
+    }
+    return '';
+  }
+
   @override
   void initState() {
     super.initState();
-    
-    // Set current user ID (in real app, this comes from auth)
-    ChatMessage.currentUserId = 'current-user-id';
-    
-    context.read<ChatBloc>().add(JoinChatEvent(chatId));
-    context.read<ChatBloc>().add(
-      LoadMessagesEvent(userId: widget.userId, groupId: widget.groupId),
-    );
+    _connectAndJoin();
+  }
+
+  Future<void> _connectAndJoin() async {
+    final signalR = sl<SignalRService>();
+    if (!signalR.isConnected) {
+      final serverUrl =
+          '${AppConstants.baseUrl}${AppConstants.signalRHubUrl}'
+          '?userId=${ChatMessage.currentUserId}';
+      debugPrint('[ChatScreen] Connecting SignalR → $serverUrl');
+      try {
+        await signalR.connect(serverUrl);
+        debugPrint('[ChatScreen] SignalR connected ✓');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('SignalR connected ✓'),
+              duration: Duration(seconds: 2),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('[ChatScreen] SignalR connect FAILED: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('SignalR error: $e'),
+              duration: const Duration(seconds: 6),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+    if (mounted) {
+      context.read<ChatBloc>().add(JoinChatEvent(chatId));
+      context.read<ChatBloc>().add(
+        LoadMessagesEvent(userId: widget.userId, groupId: widget.groupId),
+      );
+    }
   }
   
   @override
@@ -53,14 +100,30 @@ class _ChatScreenState extends State<ChatScreen> {
   void _sendMessage() {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
-    
+
     context.read<ChatBloc>().add(SendMessageEvent(text));
     _messageController.clear();
-    
-    // Scroll to bottom
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _scrollToBottom();
-    });
+
+    Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+  }
+
+  void _sendWithFiles(List<FileAttachment> files) {
+    final text = _messageController.text.trim();
+
+    context.read<ChatBloc>().add(
+      SendFileMessageEvent(
+        textContent: text.isEmpty ? null : text,
+        attachments: files,
+      ),
+    );
+    _messageController.clear();
+
+    // Clear selected files from FileUploadBloc
+    for (final f in files) {
+      context.read<FileUploadBloc>().add(RemoveFileEvent(f.id));
+    }
+
+    Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
   }
   
   void _scrollToBottom() {
@@ -138,7 +201,18 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: BlocListener<ChatBloc, ChatState>(
+        listenWhen: (prev, curr) => curr.errorMessage != null && curr.errorMessage != prev.errorMessage,
+        listener: (context, state) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.errorMessage!),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        },
+        child: Column(
         children: [
           // Messages list
           Expanded(
@@ -286,9 +360,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 BlocBuilder<FileUploadBloc, FileUploadState>(
                   builder: (context, uploadState) {
                     final hasFiles = uploadState.selectedFiles.isNotEmpty;
-                    
+
                     return FloatingActionButton.small(
-                      onPressed: hasFiles ? null : _sendMessage,
+                      onPressed: hasFiles
+                          ? () => _sendWithFiles(uploadState.selectedFiles)
+                          : _sendMessage,
                       child: Icon(hasFiles ? Icons.file_upload : Icons.send),
                     );
                   },
@@ -297,8 +373,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ],
+        ),
       ),
-      
+
       // Selected files bottom sheet
       bottomSheet: BlocBuilder<FileUploadBloc, FileUploadState>(
         builder: (context, state) {

@@ -46,6 +46,7 @@ public class MessagesController : ControllerBase
             
             var command = new SendMessageCommand(
                 _currentUser.UserId,
+                _currentUser.UserName,
                 request.ReceiverId,
                 request.GroupId,
                 request.TextContent.Trim()
@@ -137,7 +138,7 @@ public class MessagesController : ControllerBase
         [FromQuery] int pageSize = 50,
         CancellationToken cancellationToken = default)
     {
-        var query = new GetMessagesQuery(userId, groupId, page, pageSize);
+        var query = new GetMessagesQuery(_currentUser.UserId, userId, groupId, page, pageSize);
         var result = await _mediator.Send(query, cancellationToken);
         return Ok(result);
     }

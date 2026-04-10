@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import '../../core/constants.dart';
 import '../../core/use_result.dart';
@@ -37,6 +38,84 @@ class ChatMessageRepositoryImpl implements ChatMessageRepository {
     }
   }
   
+  @override
+  Future<Either<Failure, MessageWithFilesResult>> createMessageWithFiles({
+    String? receiverId,
+    String? groupId,
+    String? textContent,
+    required List<FileAttachment> files,
+  }) async {
+    try {
+      final response = await dio.post(
+        '${AppConstants.apiVersion}/messages/with-file',
+        data: {
+          'receiverId': receiverId,
+          'groupId': groupId,
+          'textContent': textContent,
+          'files': files
+              .map((f) => {
+                    'fileName': f.fileName,
+                    'fileSize': f.fileSize,
+                    'fileType': f.fileType,
+                  })
+              .toList(),
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      final messageId = data['messageId'] as String;
+      final uploadUrls = (data['uploadUrls'] as List);
+      final serverFileIds = uploadUrls
+          .map((u) => (u as Map<String, dynamic>)['fileId'] as String)
+          .toList();
+      return Right(MessageWithFilesResult(
+          messageId: messageId, serverFileIds: serverFileIds));
+    } on DioException catch (e) {
+      return Left(NetworkFailure(
+          message: e.message ?? 'Failed to create message with files'));
+    } catch (e) {
+      return Left(ServerFailure(message: e.toString()));
+    }
+  }
+
+  @override
+  Stream<int> uploadFileDirect({
+    required String serverFileId,
+    required String localFilePath,
+    required String fileType,
+  }) async* {
+    final ctrl = StreamController<int>();
+
+    dio
+        .post(
+      '${AppConstants.apiVersion}/files/$serverFileId/upload-bytes',
+      data: FormData.fromMap({
+        'file': await MultipartFile.fromFile(localFilePath),
+      }),
+      options: Options(
+        sendTimeout: const Duration(minutes: 10),
+        receiveTimeout: const Duration(minutes: 2),
+      ),
+      onSendProgress: (sent, total) {
+        if (!ctrl.isClosed && total > 0) {
+          ctrl.add((sent * 100 / total).clamp(0, 99).toInt());
+        }
+      },
+    )
+        .then((_) {
+      if (!ctrl.isClosed) {
+        ctrl.add(100);
+        ctrl.close();
+      }
+    }).catchError((dynamic e) {
+      if (!ctrl.isClosed) {
+        ctrl.addError(e as Object);
+        ctrl.close();
+      }
+    });
+
+    yield* ctrl.stream;
+  }
+
   @override
   Future<Either<Failure, List<ChatMessage>>> getDirectMessages({
     required String userId,

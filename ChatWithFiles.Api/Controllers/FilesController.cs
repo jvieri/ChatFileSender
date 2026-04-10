@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using MediatR;
+using Microsoft.AspNetCore.Http.Features;
 using ChatWithFiles.Application.Commands.Messages;
 using ChatWithFiles.Application.Commands.Files;
 using ChatWithFiles.Application.Queries.Files;
@@ -94,6 +95,46 @@ public class FilesController : ControllerBase
         }
     }
     
+    /// <summary>
+    /// Direct upload (demo): client sends bytes straight to the API, no Azurite presigned URL needed.
+    /// </summary>
+    [HttpPost("{fileId}/upload-bytes")]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = 110_000_000)]
+    public async Task<IActionResult> UploadBytes(
+        Guid fileId,
+        IFormFile file,
+        [FromServices] IFileAttachmentRepository fileRepository,
+        [FromServices] IChatHubService chatHub,
+        [FromServices] IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var attachment = await fileRepository.GetByIdAsync(fileId, cancellationToken);
+            if (attachment == null)
+                return NotFound(new { error = $"File attachment {fileId} not found" });
+
+            await fileRepository.MarkAsUploadedAsync(
+                fileId, attachment.StorageKey, file.Length, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            await unitOfWork.CommitTransactionAsync(cancellationToken);
+
+            await chatHub.NotifyFileUploadProgressAsync(
+                attachment.UploadedBy.ToString(), fileId, 100, "Uploaded");
+
+            _logger.LogInformation(
+                "Direct upload OK — FileId={FileId} Size={Size}", fileId, file.Length);
+
+            return Ok(new { fileId, status = "Uploaded", size = file.Length });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Direct upload failed for FileId={FileId}", fileId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
     /// <summary>
     /// Retry a failed file upload
     /// </summary>

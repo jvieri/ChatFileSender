@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
@@ -12,7 +13,8 @@ part 'chat_state.dart';
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ChatMessageRepository _messageRepository;
   final SignalRService _signalRService;
-  
+  late final StreamSubscription<bool> _connectionSub;
+
   ChatBloc({
     required ChatMessageRepository messageRepository,
     required SignalRService signalRService,
@@ -30,12 +32,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<LeaveChatEvent>(_onLeaveChat);
     on<LoadMoreMessagesEvent>(_onLoadMoreMessages);
     on<SimulateReceiveMessageEvent>(_onSimulateReceiveMessage);
-    
+    on<_ConnectionStateChangedEvent>(_onConnectionStateChanged);
+
     // Setup SignalR listeners
     _setupSignalRListeners();
   }
   
   void _setupSignalRListeners() {
+    _connectionSub = _signalRService.connectionStateStream.listen((connected) {
+      add(_ConnectionStateChangedEvent(connected));
+    });
+
     _signalRService.messageStream.listen((messageData) {
       // Parse and add to state
       add(ReceiveMessageEvent(_parseMessageFromSignalR(messageData)));
@@ -72,8 +79,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     LoadMessagesEvent event,
     Emitter<ChatState> emit,
   ) async {
-    emit(state.copyWith(isLoading: true));
-    
+    emit(state.copyWith(
+      isLoading: true,
+      userId: event.userId,
+      groupId: event.groupId,
+    ));
+
     final result = event.groupId != null
         ? await _messageRepository.getGroupMessages(
             groupId: event.groupId!,
@@ -83,7 +94,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             userId: event.userId!,
             page: 1,
           );
-    
+
     result.fold(
       (failure) => emit(state.copyWith(
         isLoading: false,
@@ -91,6 +102,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       )),
       (messages) => emit(state.copyWith(
         isLoading: false,
+        userId: event.userId,
+        groupId: event.groupId,
         messages: messages.reversed.toList(), // Show oldest first
         hasMore: messages.length >= 50,
         currentPage: 1,
@@ -134,21 +147,40 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     Emitter<ChatState> emit,
   ) async {
     if (event.textContent.trim().isEmpty) return;
-    
+
+    // Optimistic: show message immediately with a temp id
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final tempMessage = ChatMessage(
+      id: tempId,
+      senderId: ChatMessage.currentUserId,
+      senderName: 'You',
+      receiverId: state.userId,
+      groupId: state.groupId,
+      textContent: event.textContent,
+      messageType: MessageType.text,
+      createdAt: DateTime.now(),
+    );
+    emit(state.copyWith(messages: [...state.messages, tempMessage]));
+
     final result = await _messageRepository.sendMessage(
       receiverId: state.userId,
       groupId: state.groupId,
       textContent: event.textContent,
     );
-    
+
     result.fold(
-      (failure) => emit(state.copyWith(errorMessage: failure.message)),
+      (failure) {
+        // Remove temp message on failure
+        final msgs = state.messages.where((m) => m.id != tempId).toList();
+        emit(state.copyWith(messages: msgs, errorMessage: failure.message));
+      },
       (message) {
-        final updatedMessages = [...state.messages, message];
-        emit(state.copyWith(
-          messages: updatedMessages,
-          errorMessage: null,
-        ));
+        // Replace temp message with the server-confirmed one (dedup by id)
+        final msgs = state.messages
+            .where((m) => m.id != tempId && m.id != message.id)
+            .toList()
+          ..add(message);
+        emit(state.copyWith(messages: msgs, errorMessage: null));
       },
     );
   }
@@ -157,21 +189,99 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     SendFileMessageEvent event,
     Emitter<ChatState> emit,
   ) async {
-    // Create message with file placeholder
-    final tempMessage = ChatMessage(
-      id: UniqueKey().toString(),
-      senderId: ChatMessage.currentUserId,
-      senderName: 'You',
+    if (event.attachments.isEmpty) return;
+
+    // ── 1. Show message immediately with files at 0 % uploading ──────────────
+    final tempId = 'temp_file_${DateTime.now().millisecondsSinceEpoch}';
+    final uploadingAttachments = event.attachments
+        .map((f) => f.copyWith(
+              uploadStatus: UploadStatus.uploading,
+              uploadProgress: 0,
+            ))
+        .toList();
+
+    emit(state.copyWith(messages: [
+      ...state.messages,
+      ChatMessage(
+        id: tempId,
+        senderId: ChatMessage.currentUserId,
+        senderName: 'You',
+        receiverId: state.userId,
+        groupId: state.groupId,
+        textContent: event.textContent,
+        messageType: MessageType.file,
+        attachments: uploadingAttachments,
+        createdAt: DateTime.now(),
+      ),
+    ]));
+
+    // ── 2. Create message record on server + get server file IDs ─────────────
+    final createResult = await _messageRepository.createMessageWithFiles(
       receiverId: state.userId,
       groupId: state.groupId,
       textContent: event.textContent,
-      messageType: MessageType.file,
-      attachments: event.attachments,
-      createdAt: DateTime.now(),
+      files: event.attachments,
     );
-    
-    final updatedMessages = [...state.messages, tempMessage];
-    emit(state.copyWith(messages: updatedMessages));
+
+    MessageWithFilesResult? serverData;
+    String? createError;
+    createResult.fold(
+      (failure) => createError = failure.message,
+      (r) => serverData = r,
+    );
+
+    if (createError != null) {
+      final msgs = state.messages.where((m) => m.id != tempId).toList();
+      emit(state.copyWith(messages: msgs, errorMessage: createError));
+      return;
+    }
+
+    // ── 3. Upload each file; emit progress into the temp message bubble ───────
+    for (int i = 0;
+        i < event.attachments.length && i < serverData!.serverFileIds.length;
+        i++) {
+      final clientFile = event.attachments[i];
+      final serverFileId = serverData!.serverFileIds[i];
+
+      if (clientFile.localFilePath == null) continue;
+
+      try {
+        await for (final progress in _messageRepository.uploadFileDirect(
+          serverFileId: serverFileId,
+          localFilePath: clientFile.localFilePath!,
+          fileType: clientFile.fileType,
+        )) {
+          final updatedMsgs = state.messages.map((m) {
+            if (m.id != tempId) return m;
+            final updatedAttachments = m.attachments.map((a) {
+              if (a.id != clientFile.id) return a;
+              return a.copyWith(
+                uploadProgress: progress.clamp(0, 100),
+                uploadStatus: progress >= 100
+                    ? UploadStatus.completed
+                    : UploadStatus.uploading,
+              );
+            }).toList();
+            return m.copyWith(attachments: updatedAttachments);
+          }).toList();
+          emit(state.copyWith(messages: updatedMsgs));
+        }
+      } catch (e) {
+        debugPrint('[ChatBloc] upload error for $serverFileId: $e');
+        final updatedMsgs = state.messages.map((m) {
+          if (m.id != tempId) return m;
+          final updatedAttachments = m.attachments.map((a) {
+            if (a.id != clientFile.id) return a;
+            return a.copyWith(
+              uploadStatus: UploadStatus.failed,
+              errorMessage: e.toString(),
+            );
+          }).toList();
+          return m.copyWith(attachments: updatedAttachments);
+        }).toList();
+        emit(state.copyWith(messages: updatedMsgs));
+      }
+    }
   }
   
   void _onReceiveMessage(
@@ -267,11 +377,22 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     JoinChatEvent event,
     Emitter<ChatState> emit,
   ) async {
-    await _signalRService.joinChat(event.chatId);
+    try {
+      await _signalRService.joinChat(event.chatId);
+    } catch (e) {
+      debugPrint('[ChatBloc] joinChat error: $e');
+    }
     emit(state.copyWith(
       chatId: event.chatId,
-      isConnected: true,
+      isConnected: _signalRService.isConnected,
     ));
+  }
+
+  void _onConnectionStateChanged(
+    _ConnectionStateChangedEvent event,
+    Emitter<ChatState> emit,
+  ) {
+    emit(state.copyWith(isConnected: event.connected));
   }
   
   Future<void> _onLeaveChat(
@@ -342,6 +463,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   
   @override
   Future<void> close() {
+    _connectionSub.cancel();
     _signalRService.dispose();
     return super.close();
   }

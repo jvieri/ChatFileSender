@@ -2,17 +2,17 @@ class AppConstants {
   // API
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://localhost:5001',
+    defaultValue: 'http://10.0.2.2:5010',
   );
   static const String apiVersion = '/api/v1';
   static const String signalRHubUrl = '/hubs/chat';
-  
+
   // File Upload
   static const int maxFileSize = 100 * 1024 * 1024; // 100 MB
   static const int maxConcurrentUploads = 3;
   static const Duration uploadUrlExpiration = Duration(hours: 1);
   static const Duration downloadUrlExpiration = Duration(hours: 24);
-  
+
   // Allowed file types
   static const Set<String> allowedFileTypes = {
     // Images
@@ -34,12 +34,12 @@ class AppConstants {
     // Text
     'text/plain', 'text/csv',
   };
-  
+
   // Retry
   static const int maxRetries = 3;
   static const Duration baseRetryDelay = Duration(seconds: 10);
   static const Duration maxRetryDelay = Duration(hours: 1);
-  
+
   // Background work
   static const String uploadWorkTag = 'file_upload';
   static const String cleanupWorkTag = 'file_cleanup';

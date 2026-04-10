@@ -87,3 +87,12 @@ class SimulateReceiveMessageEvent extends ChatEvent {
   @override
   List<Object?> get props => [senderId, senderName, textContent];
 }
+
+// Internal event — fired by connectionStateStream subscription
+class _ConnectionStateChangedEvent extends ChatEvent {
+  final bool connected;
+  // ignore: prefer_const_constructors_in_immutables
+  _ConnectionStateChangedEvent(this.connected);
+  @override
+  List<Object?> get props => [connected];
+}

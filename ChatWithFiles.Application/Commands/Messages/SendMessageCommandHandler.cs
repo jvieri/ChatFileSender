@@ -50,7 +50,7 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Cha
         {
             messageId = message.Id,
             senderId = message.SenderId,
-            senderName = "User", // Would come from user service
+            senderName = request.SenderName,
             receiverId = message.ReceiverId,
             groupId = message.GroupId,
             textContent = message.TextContent,
@@ -76,11 +76,12 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Cha
     private string GetChatId(ChatMessage message)
     {
         if (message.GroupId.HasValue)
-        {
-            return $"group_{message.GroupId.Value:N}";
-        }
-        
-        // For direct messages, use both user IDs so either can receive
-        return $"direct_{message.SenderId:N}_{message.ReceiverId:N}";
+            return message.GroupId.Value.ToString(); // "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+        // Sort both IDs so the room name is identical regardless of who sends.
+        // Must match Flutter: final ids = [me, other]..sort(); return '${ids[0]}_${ids[1]}';
+        var ids = new[] { message.SenderId.ToString(), message.ReceiverId!.Value.ToString() };
+        Array.Sort(ids, StringComparer.Ordinal);
+        return $"{ids[0]}_{ids[1]}";
     }
 }

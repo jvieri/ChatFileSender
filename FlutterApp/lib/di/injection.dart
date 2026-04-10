@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
 import '../core/constants.dart';
+import '../domain/entities/chat_message.dart';
 import '../data/local/app_database.dart';
 import '../data/datasources/file_upload_remote_data_source.dart';
 import '../data/datasources/file_upload_local_data_source.dart';
@@ -37,15 +38,17 @@ Future<void> initDependencies() async {
     sendTimeout: const Duration(seconds: 60),
   ));
   
-  // Add auth interceptor
+  // Add demo auth interceptor: injects current user ID so the backend
+  // can identify who is making the request without a real JWT.
   dio.interceptors.add(InterceptorsWrapper(
     onRequest: (options, handler) {
-      // Add auth token from secure storage
-      // options.headers['Authorization'] = 'Bearer $token';
+      final userId = ChatMessage.currentUserId;
+      if (userId.isNotEmpty) {
+        options.headers['X-User-Id'] = userId;
+      }
       return handler.next(options);
     },
     onError: (error, handler) {
-      // Handle 401 - redirect to login
       return handler.next(error);
     },
   ));
